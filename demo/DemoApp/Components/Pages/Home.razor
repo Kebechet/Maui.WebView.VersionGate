@@ -1,0 +1,31 @@
+﻿@page "/"
+@using Kebechet.Maui.WebView.VersionGate
+
+<h1>Maui.WebView.VersionGate</h1>
+
+<p>
+    This demo sets <code>MinimumSupportedMajorVersion</code> to 999, so the update dialog shows on every Android phone,
+    and <code>MinimumUsableMajorVersion</code> to 1, so it offers Cancel. Update opens Android System WebView in the
+    Play Store; back returns to the dialog. Cancel lets you in until the app's process ends.
+</p>
+
+@if (GateHitLog.LastGateHit is null)
+{
+    <p>The gate has not reported a hit in this process (it only runs on Android).</p>
+}
+else
+{
+    <h2>What the gate reported</h2>
+    <dl>
+        <dt>Chromium major version (from the user agent)</dt>
+        <dd>@GateHitLog.LastGateHit.ChromiumMajorVersion</dd>
+        <dt>Decision</dt>
+        <dd>@GateHitLog.LastGateHit.Decision</dd>
+        <dt>Provider package</dt>
+        <dd>@GateHitLog.LastGateHit.ProviderPackageName @GateHitLog.LastGateHit.ProviderVersionName</dd>
+        <dt>Device</dt>
+        <dd>@GateHitLog.LastGateHit.DeviceManufacturer @GateHitLog.LastGateHit.DeviceModel, API @GateHitLog.LastGateHit.AndroidApiLevel</dd>
+        <dt>User agent</dt>
+        <dd><code>@GateHitLog.LastGateHit.UserAgent</code></dd>
+    </dl>
+}

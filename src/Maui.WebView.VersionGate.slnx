@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Maui.WebView.VersionGate\Maui.WebView.VersionGate.csproj" />
+  <Project Path="..\tests\Maui.WebView.VersionGate.Tests\Maui.WebView.VersionGate.Tests.csproj" />
+</Solution>

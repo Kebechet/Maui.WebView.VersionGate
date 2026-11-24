@@ -1,0 +1,131 @@
+name: Publish to NuGet
+
+on:
+  workflow_dispatch:
+
+env:
+  PROJECT_PATH: src/Maui.WebView.VersionGate/Maui.WebView.VersionGate.csproj
+  SOLUTION_PATH: src/Maui.WebView.VersionGate.slnx
+  PACKAGE_NAME: Kebechet.Maui.WebView.VersionGate
+  DOTNET_VERSION: '10.0.x'
+  BUILD_CONFIGURATION: Release
+  OUTPUT_PATH: ./nupkg
+  NUGET_SOURCE: https://api.nuget.org/v3/index.json
+  NUGET_USER: Kebechet
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write # lets NuGet/login request the GitHub OIDC token
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # UseMaui needs the MAUI workload even for the plain net10.0 target; Android is the only platform target.
+      - name: Install the MAUI Android workload
+        run: dotnet workload install maui-android
+
+      - name: Get version from csproj
+        id: version
+        run: |
+          VERSION=$(grep -oP '(?<=<Version>)[^<]+' ${{ env.PROJECT_PATH }})
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Restore dependencies
+        run: dotnet restore ${{ env.SOLUTION_PATH }}
+
+      # The package id is permanent on nuget.org: a wrong prefix can only be deprecated, never renamed.
+      # Maui.* needs UseMaui or a platform TFM, a Razor library without them is Blazor.*, and
+      # Api/Extensions/Types/Build are neither (new-nuget-package skill, "The name must fit the project").
+      - name: Check the package id fits the project
+        run: |
+          PACKAGE_ID=$(dotnet msbuild "$PROJECT_PATH" -getProperty:PackageId)
+          USE_MAUI=$(dotnet msbuild "$PROJECT_PATH" -getProperty:UseMaui)
+          IS_RAZOR=$(dotnet msbuild "$PROJECT_PATH" -getProperty:UsingMicrosoftNETSdkRazor)
+          TFMS=$(dotnet msbuild "$PROJECT_PATH" -getProperty:TargetFramework)$(dotnet msbuild "$PROJECT_PATH" -getProperty:TargetFrameworks)
+
+          KIND=plain
+          if [ "$USE_MAUI" = true ] || echo "$TFMS" | grep -qE -- '-(android|ios|maccatalyst|windows|tizen)'; then
+            KIND=maui
+          elif [ "$IS_RAZOR" = true ]; then
+            KIND=razor
+          fi
+
+          case "$PACKAGE_ID" in
+            Kebechet.Maui.*) ALLOWED="maui" ;;
+            Kebechet.Blazor.*) ALLOWED="razor plain" ;;
+            Kebechet.Api.*|Kebechet.Extensions.*|Kebechet.Types.*|Kebechet.Build.*) ALLOWED="plain" ;;
+            *) echo "::error::$PACKAGE_ID has no Kebechet prefix (Blazor, Maui, Api, Extensions, Types, Build)"; exit 1 ;;
+          esac
+
+          if ! echo " $ALLOWED " | grep -q " $KIND "; then
+            echo "::error::$PACKAGE_ID does not fit its project, which is '$KIND' (maui = UseMaui or a platform TFM; razor = Microsoft.NET.Sdk.Razor without them). Maui.* needs maui, a razor library is Blazor.*, Api/Extensions/Types/Build need plain. The id is permanent on nuget.org: rename before the first publish."
+            exit 1
+          fi
+
+          echo "$PACKAGE_ID fits its project ($KIND)"
+
+      # GeneratePackageOnBuild means the build itself emits the .nupkg (and .snupkg) under
+      # src/<Project>/bin/<Config>/, so a separate `dotnet pack` step is redundant.
+      - name: Build (produces the .nupkg via GeneratePackageOnBuild)
+        run: dotnet build ${{ env.SOLUTION_PATH }} --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
+
+      - name: Test
+        run: dotnet test ${{ env.SOLUTION_PATH }} --no-build --configuration ${{ env.BUILD_CONFIGURATION }}
+
+      - name: Collect package
+        run: |
+          mkdir -p ${{ env.OUTPUT_PATH }}
+          cp src/*/bin/${{ env.BUILD_CONFIGURATION }}/*.nupkg ${{ env.OUTPUT_PATH }}/
+          cp src/*/bin/${{ env.BUILD_CONFIGURATION }}/*.snupkg ${{ env.OUTPUT_PATH }}/ || true
+          ls -la ${{ env.OUTPUT_PATH }}
+
+      # Every consumer platform except Android takes the net10.0 assembly, and the gate itself lives only in the
+      # Android one: a package missing either installs cleanly and silently does nothing.
+      - name: Verify the package carries both assemblies
+        run: |
+          PKG=$(ls ${{ env.OUTPUT_PATH }}/${{ env.PACKAGE_NAME }}.*.nupkg | grep -v snupkg)
+          unzip -l "$PKG" | grep -q "lib/net10.0/Maui.WebView.VersionGate.dll" || { echo "::error::net10.0 assembly missing"; exit 1; }
+          unzip -l "$PKG" | grep -qE "lib/net10.0-android[0-9.]*/Maui.WebView.VersionGate.dll" || { echo "::error::Android assembly missing"; exit 1; }
+
+      # Trusted Publishing: the policy on nuget.org matches this workflow's file name, and the
+      # key it returns expires after 1 hour, so keep this step directly before the push.
+      - name: NuGet login (OIDC -> temporary API key)
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ env.NUGET_USER }}
+
+      - name: Publish to NuGet
+        run: dotnet nuget push ${{ env.OUTPUT_PATH }}/*.nupkg --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }} --source ${{ env.NUGET_SOURCE }} --skip-duplicate
+
+      - name: Publish to GitHub Packages
+        run: dotnet nuget push ${{ env.OUTPUT_PATH }}/*.nupkg --api-key ${{ secrets.GITHUB_TOKEN }} --source https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --skip-duplicate
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          body: |
+            ## ${{ env.PACKAGE_NAME }} v${{ steps.version.outputs.version }}
+
+            ### Installation
+            ```bash
+            dotnet add package ${{ env.PACKAGE_NAME }} --version ${{ steps.version.outputs.version }}
+            ```
+
+            ### Links
+            - [NuGet Package](https://www.nuget.org/packages/${{ env.PACKAGE_NAME }}/${{ steps.version.outputs.version }})
+            - [GitHub](https://github.com/Kebechet/Maui.WebView.VersionGate)
+          files: ${{ env.OUTPUT_PATH }}/*.nupkg
+          generate_release_notes: true

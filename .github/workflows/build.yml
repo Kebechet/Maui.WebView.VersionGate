@@ -1,0 +1,38 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  SOLUTION_PATH: src/Maui.WebView.VersionGate.slnx
+  DOTNET_VERSION: '10.0.x'
+  BUILD_CONFIGURATION: Release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    # UseMaui needs the MAUI workload even for the plain net10.0 target; Android is the only platform target.
+    - name: Install the MAUI Android workload
+      run: dotnet workload install maui-android
+
+    - name: Restore dependencies
+      run: dotnet restore ${{ env.SOLUTION_PATH }}
+
+    - name: Build
+      run: dotnet build ${{ env.SOLUTION_PATH }} --no-restore --configuration ${{ env.BUILD_CONFIGURATION }}
+
+    # No Codecov upload: the repository has no CODECOV_TOKEN, and a half-wired upload step only adds noise.
+    - name: Test
+      run: dotnet test ${{ env.SOLUTION_PATH }} --no-build --configuration ${{ env.BUILD_CONFIGURATION }}

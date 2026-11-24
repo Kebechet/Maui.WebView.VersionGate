@@ -1,0 +1,15 @@
+root = true
+
+[*]
+end_of_line = crlf
+indent_style = tab
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+[*.{csproj,props,targets,xml,slnx,yml,yaml,json,md}]
+indent_style = space
+indent_size = 2
+
+[*.cs]
+csharp_space_after_keywords_in_control_flow_statements = false
+csharp_space_after_cast = true

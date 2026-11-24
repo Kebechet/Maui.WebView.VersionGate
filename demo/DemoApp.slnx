@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="../src/Maui.WebView.VersionGate/Maui.WebView.VersionGate.csproj" />
+  <Project Path="DemoApp/DemoApp.csproj">
+    <Deploy />
+  </Project>
+</Solution>
